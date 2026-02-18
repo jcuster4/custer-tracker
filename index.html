@@ -1,0 +1,1898 @@
+import React, { useState, useEffect } from 'react';
+
+// Helper function to get workout variant based on week
+function getWeekVariant(week) {
+  if (week === 9) return 'deload';
+  return week % 2 === 1 ? 'A' : 'B'; // Odd weeks = A, Even weeks = B
+}
+
+// Helper to calculate progression weights with cycle offset
+function getProgressionWeight(baseWeight, week, cycleOffset = 0) {
+  const adjustedWeight = baseWeight + (cycleOffset * 5);
+  
+  if (week === 1 || week === 2) return adjustedWeight;
+  if (week === 3 || week === 4) return adjustedWeight + 20;
+  if (week === 5 || week === 6) return adjustedWeight + 40;
+  if (week === 7 || week === 8) return adjustedWeight + 60;
+  return adjustedWeight;
+}
+
+export default function WorkoutTracker() {
+  const [activeTab, setActiveTab] = useState('schedule');
+  const [completedWorkouts, setCompletedWorkouts] = useState({});
+  const [weight, setWeight] = useState('');
+  const [bodyFat, setBodyFat] = useState('');
+  const [weightHistory, setWeightHistory] = useState([]);
+  const [showLogModal, setShowLogModal] = useState(false);
+  const [currentWorkout, setCurrentWorkout] = useState(null);
+  const [workoutNotes, setWorkoutNotes] = useState('');
+  const [zone2Type, setZone2Type] = useState('');
+  const [zone2Duration, setZone2Duration] = useState('');
+  const [strengthWeights, setStrengthWeights] = useState({});
+  const [currentWeek, setCurrentWeek] = useState(1);
+  const [cycleOffset, setCycleOffset] = useState(0);
+  const [showQuickLog, setShowQuickLog] = useState(false);
+  const [quickLogDate, setQuickLogDate] = useState('');
+
+  // Load data from localStorage
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  function loadData() {
+    console.log('=== LOADING DATA ===');
+    console.log('All localStorage keys:', Object.keys(localStorage));
+    
+    // Try to load from backup first
+    try {
+      const backup = localStorage.getItem('custer-backup');
+      if (backup) {
+        const data = JSON.parse(backup);
+        console.log('Loaded from backup:', data);
+        if (data.completedWorkouts) setCompletedWorkouts(data.completedWorkouts);
+        if (data.weightHistory) setWeightHistory(data.weightHistory);
+        if (data.currentWeek) setCurrentWeek(data.currentWeek);
+        if (data.cycleOffset) setCycleOffset(data.cycleOffset);
+        return; // Exit if backup loaded successfully
+      }
+    } catch (error) {
+      console.log('No backup found');
+    }
+    
+    try {
+      const completed = localStorage.getItem('custer-completed-workouts');
+      console.log('Completed workouts raw:', completed);
+      if (completed) {
+        const parsed = JSON.parse(completed);
+        console.log('Completed workouts parsed:', parsed);
+        setCompletedWorkouts(parsed);
+      }
+    } catch (error) {
+      console.log('No completed workouts found:', error);
+    }
+    
+    try {
+      const history = localStorage.getItem('custer-weight-history');
+      console.log('Weight history raw:', history);
+      if (history) {
+        const parsed = JSON.parse(history);
+        console.log('Weight history parsed:', parsed);
+        setWeightHistory(parsed);
+      }
+    } catch (error) {
+      console.log('No weight history found:', error);
+    }
+    
+    try {
+      const weekData = localStorage.getItem('custer-current-week');
+      console.log('Week data:', weekData);
+      if (weekData) {
+        setCurrentWeek(parseInt(weekData));
+      }
+    } catch (error) {
+      console.log('No week data found:', error);
+    }
+    
+    try {
+      const cycleData = localStorage.getItem('custer-cycle-offset');
+      console.log('Cycle data:', cycleData);
+      if (cycleData) {
+        setCycleOffset(parseInt(cycleData));
+      }
+    } catch (error) {
+      console.log('No cycle data found:', error);
+    }
+    console.log('=== LOAD COMPLETE ===');
+  }
+
+  function saveCompletedWorkouts(data) {
+    try {
+      localStorage.setItem('custer-completed-workouts', JSON.stringify(data));
+      console.log('Saved workouts to localStorage');
+    } catch (error) {
+      console.error('Error saving workouts:', error);
+      alert('Failed to save workout. Please try again.');
+    }
+  }
+
+  function saveWeightHistory(data) {
+    try {
+      localStorage.setItem('custer-weight-history', JSON.stringify(data));
+      console.log('Saved weight history to localStorage');
+    } catch (error) {
+      console.error('Error saving weight:', error);
+      alert('Failed to save weight. Please try again.');
+    }
+  }
+
+  function saveWeek(week) {
+    try {
+      localStorage.setItem('custer-current-week', week.toString());
+      console.log('Saved week to localStorage');
+    } catch (error) {
+      console.error('Error saving week:', error);
+    }
+  }
+
+  function saveCycleOffset(offset) {
+    try {
+      localStorage.setItem('custer-cycle-offset', offset.toString());
+      console.log('Saved cycle offset to localStorage');
+    } catch (error) {
+      console.error('Error saving cycle:', error);
+    }
+  }
+
+  function advanceWeek() {
+    let newWeek = currentWeek + 1;
+    let newOffset = cycleOffset;
+    
+    if (newWeek > 9) {
+      newWeek = 1;
+      newOffset = cycleOffset + 1; // Add 5 lbs to all lifts
+      setCycleOffset(newOffset);
+      saveCycleOffset(newOffset);
+    }
+    
+    setCurrentWeek(newWeek);
+    saveWeek(newWeek);
+  }
+
+  function previousWeek() {
+    if (currentWeek > 1) {
+      const newWeek = currentWeek - 1;
+      setCurrentWeek(newWeek);
+      saveWeek(newWeek);
+    }
+  }
+
+  function handleLogWorkout(day, workoutName) {
+    setCurrentWorkout({ day, workoutName });
+    setShowLogModal(true);
+  }
+
+  function confirmLogWorkout() {
+    const key = `${currentWorkout.day}-${currentWorkout.workoutName}`;
+    let notes = workoutNotes;
+    
+    if (currentWorkout.workoutName === 'Zone 2 Cardio') {
+      const parts = [];
+      if (zone2Type) parts.push(zone2Type);
+      if (zone2Duration) parts.push(zone2Duration);
+      if (workoutNotes) parts.push(workoutNotes);
+      notes = parts.join(' | ');
+    } else if (['Full Body', 'Lower A', 'Lower B', 'Upper A', 'Upper B', 'Lower Deload', 'Upper Deload'].includes(currentWorkout.workoutName) && Object.keys(strengthWeights).length > 0) {
+      notes = JSON.stringify(strengthWeights);
+    }
+    
+    const newCompleted = {
+      ...completedWorkouts,
+      [key]: {
+        date: new Date().toISOString(),
+        notes: notes,
+        week: currentWeek
+      }
+    };
+    setCompletedWorkouts(newCompleted);
+    saveCompletedWorkouts(newCompleted);
+    setShowLogModal(false);
+    setWorkoutNotes('');
+    setZone2Type('');
+    setZone2Duration('');
+    setStrengthWeights({});
+  }
+
+  function handleSaveWeight() {
+    if (!weight) return;
+    
+    const entry = {
+      date: new Date().toISOString(),
+      weight: parseFloat(weight),
+      bodyFat: bodyFat ? parseFloat(bodyFat) : null
+    };
+    
+    const newHistory = [entry, ...weightHistory];
+    setWeightHistory(newHistory);
+    saveWeightHistory(newHistory);
+    setWeight('');
+    setBodyFat('');
+  }
+
+  function isWorkoutCompleted(day, workoutName) {
+    const key = `${day}-${workoutName}`;
+    return completedWorkouts[key] !== undefined;
+  }
+
+  function getTodayCompletedCount() {
+    const today = new Date().toLocaleDateString('en-US', { weekday: 'long' });
+    const todaySchedule = getScheduleForDay(today);
+    if (!todaySchedule) return 0;
+    
+    return todaySchedule.workouts.filter(w => 
+      isWorkoutCompleted(today, w.name)
+    ).length;
+  }
+
+  function getWeekCompletedCount() {
+    return Object.keys(completedWorkouts).length;
+  }
+
+  const currentWeight = weightHistory.length > 0 ? weightHistory[0].weight : '--';
+  const currentBodyFat = weightHistory.length > 0 && weightHistory[0].bodyFat 
+    ? weightHistory[0].bodyFat 
+    : '--';
+
+  const variant = getWeekVariant(currentWeek);
+
+  // Get schedule for a specific day
+  function getScheduleForDay(day) {
+    const baseSchedule = {
+      'Monday': [
+        { name: 'Morning Movement', time: '5:00-5:30 AM', type: 'cardio' },
+        { name: 'Jiu-Jitsu', time: '6:00-7:00 AM', type: 'jujitsu' },
+        { name: 'Zone 2 Cardio', time: '11:30 AM-12:00 PM', type: 'cardio' },
+        { name: 'Supplements', time: '12:00-12:30 PM', type: 'other' },
+        { name: 'Evening Movement', time: '8:00-8:30 PM', type: 'cardio' },
+        { name: 'Reading', time: '8:30-9:00 PM', type: 'other' }
+      ],
+      'Tuesday': [
+        { name: 'Morning Movement', time: '5:00-5:30 AM', type: 'cardio' },
+        { name: 'Jiu-Jitsu', time: '6:00-7:00 AM', type: 'jujitsu' },
+        { name: 'Zone 2 Cardio', time: '11:30 AM-12:00 PM', type: 'cardio' },
+        { name: 'Supplements', time: '12:00-12:30 PM', type: 'other' },
+        { name: 'Evening Movement', time: '8:00-8:30 PM', type: 'cardio' },
+        { name: 'Reading', time: '8:30-9:00 PM', type: 'other' }
+      ],
+      'Wednesday': [
+        { name: 'Zone 2 Cardio', time: '11:30 AM-12:00 PM', type: 'cardio' },
+        { name: 'Supplements', time: '12:00-12:30 PM', type: 'other' },
+        { name: 'Full Body', time: '12:00-1:00 PM', type: 'weights' },
+        { name: 'Evening Movement', time: '8:00-8:30 PM', type: 'cardio' },
+        { name: 'Reading', time: '8:30-9:00 PM', type: 'other' }
+      ],
+      'Thursday': [
+        { name: 'Morning Movement', time: '5:00-5:30 AM', type: 'cardio' },
+        { name: 'Jiu-Jitsu', time: '6:00-7:00 AM', type: 'jujitsu' },
+        { name: 'Zone 2 Cardio', time: '11:30 AM-12:00 PM', type: 'cardio' },
+        { name: 'Supplements', time: '12:00-12:30 PM', type: 'other' },
+        { name: 'Evening Movement', time: '8:00-8:30 PM', type: 'cardio' },
+        { name: 'Reading', time: '8:30-9:00 PM', type: 'other' }
+      ],
+      'Friday': [
+        { name: 'Morning Movement', time: '5:00-5:30 AM', type: 'cardio' },
+        { name: 'Jiu-Jitsu', time: '6:00-7:00 AM', type: 'jujitsu' },
+        { name: 'Zone 2 Cardio', time: '11:30 AM-12:00 PM', type: 'cardio' },
+        { name: 'Supplements', time: '12:00-12:30 PM', type: 'other' },
+        { name: 'Evening Movement', time: '8:00-8:30 PM', type: 'cardio' },
+        { name: 'Reading', time: '8:30-9:00 PM', type: 'other' }
+      ],
+      'Saturday': [
+        { name: variant === 'deload' ? 'Lower Deload' : `Lower ${variant}`, time: '9:00-10:00 AM', type: 'weights' },
+        { name: 'Supplements', time: '12:00-12:30 PM', type: 'other' }
+      ],
+      'Sunday': [
+        { name: 'Sprint/Hill Sprints', time: '6:00-6:45 AM', type: 'cardio' },
+        { name: 'Supplements', time: '12:00-12:30 PM', type: 'other' },
+        { name: variant === 'deload' ? 'Upper Deload' : `Upper ${variant}`, time: '2:00-3:00 PM', type: 'weights' }
+      ]
+    };
+
+    return { day, workouts: baseSchedule[day] || [] };
+  }
+
+  const workoutSchedule = [
+    'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'
+  ].map(day => getScheduleForDay(day));
+
+  return (
+    <div className="min-h-screen bg-zinc-950 text-white pb-24">
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Anton&display=swap');
+        
+        .header-title {
+          font-family: 'Anton', sans-serif;
+          font-size: 48px;
+          letter-spacing: 2px;
+          text-transform: uppercase;
+          background: linear-gradient(135deg, #ff3b30, #ff9500);
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+          background-clip: text;
+        }
+        
+        .day-title {
+          font-family: 'Anton', sans-serif;
+          letter-spacing: 1px;
+        }
+        
+        .stat-value {
+          font-family: 'Anton', sans-serif;
+          font-size: 32px;
+          letter-spacing: 1px;
+          background: linear-gradient(135deg, #ff3b30, #ff9500);
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+          background-clip: text;
+        }
+      `}</style>
+
+      <div className="max-w-2xl mx-auto px-5 py-6">
+        {/* Header */}
+        <div className="text-center mb-8 pb-6 border-b-2 border-red-500">
+          <h1 className="header-title mb-2">CUSTER TRACKER</h1>
+          <p className="text-zinc-500 text-sm font-medium">Track Your Journey to 12%</p>
+          <div className="mt-3 flex justify-center items-center gap-3">
+            <span className="text-zinc-400 text-sm">Week {currentWeek}/9</span>
+            <span className="text-zinc-600">|</span>
+            <span className="text-orange-500 text-sm font-bold">
+              {variant === 'deload' ? 'DELOAD' : `Variant ${variant}`}
+            </span>
+            <button 
+              onClick={previousWeek}
+              disabled={currentWeek === 1}
+              className="ml-2 bg-zinc-800 hover:bg-zinc-700 text-white text-xs px-3 py-1 rounded-lg font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              ← Prev Week
+            </button>
+            <button 
+              onClick={advanceWeek}
+              className="bg-zinc-800 hover:bg-zinc-700 text-white text-xs px-3 py-1 rounded-lg font-semibold"
+            >
+              Next Week →
+            </button>
+            <button 
+              onClick={() => setShowQuickLog(true)}
+              className="ml-2 bg-red-500 hover:bg-orange-500 text-white text-xs px-3 py-1 rounded-lg font-semibold"
+            >
+              + Quick Log
+            </button>
+          </div>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex gap-2 mb-6 bg-zinc-900 p-1.5 rounded-xl">
+          <button 
+            className={`flex-1 py-3 px-4 rounded-lg font-semibold text-sm transition-all ${
+              activeTab === 'schedule' 
+                ? 'bg-red-500 text-white' 
+                : 'bg-transparent text-zinc-500'
+            }`}
+            onClick={() => setActiveTab('schedule')}
+          >
+            Schedule
+          </button>
+          <button 
+            className={`flex-1 py-3 px-4 rounded-lg font-semibold text-sm transition-all ${
+              activeTab === 'progress' 
+                ? 'bg-red-500 text-white' 
+                : 'bg-transparent text-zinc-500'
+            }`}
+            onClick={() => setActiveTab('progress')}
+          >
+            Progress
+          </button>
+          <button 
+            className={`flex-1 py-3 px-4 rounded-lg font-semibold text-sm transition-all ${
+              activeTab === 'history' 
+                ? 'bg-red-500 text-white' 
+                : 'bg-transparent text-zinc-500'
+            }`}
+            onClick={() => setActiveTab('history')}
+          >
+            History
+          </button>
+        </div>
+
+        {/* Schedule Tab */}
+        {activeTab === 'schedule' && (
+          <>
+            <div className="grid grid-cols-2 gap-4 mb-6">
+              <div className="bg-zinc-900 p-5 rounded-2xl border border-zinc-800">
+                <div className="text-zinc-500 text-xs font-semibold uppercase mb-2">Today</div>
+                <div className="stat-value">{getTodayCompletedCount()}</div>
+              </div>
+              <div className="bg-zinc-900 p-5 rounded-2xl border border-zinc-800">
+                <div className="text-zinc-500 text-xs font-semibold uppercase mb-2">This Week</div>
+                <div className="stat-value">{getWeekCompletedCount()}</div>
+              </div>
+            </div>
+
+            {workoutSchedule.map((daySchedule, index) => {
+              const completedCount = daySchedule.workouts.filter(w => 
+                isWorkoutCompleted(daySchedule.day, w.name)
+              ).length;
+              const isComplete = completedCount === daySchedule.workouts.length;
+
+              // Calculate the date for this day - relative to training week
+              const today = new Date();
+              const currentDayOfWeek = today.getDay();
+              const daysOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+              const targetDayIndex = daysOfWeek.indexOf(daySchedule.day);
+              
+              // Find this week's Monday
+              const daysFromMonday = currentDayOfWeek === 0 ? -6 : 1 - currentDayOfWeek;
+              const thisMonday = new Date(today);
+              thisMonday.setDate(today.getDate() + daysFromMonday);
+              
+              // Add weeks based on tracker week (week 1 = current week, week 2 = next week, etc)
+              const weeksToAdd = currentWeek - 1;
+              const targetWeekMonday = new Date(thisMonday);
+              targetWeekMonday.setDate(thisMonday.getDate() + (weeksToAdd * 7));
+              
+              // Calculate target day within that week
+              const targetDate = new Date(targetWeekMonday);
+              const dayOffset = targetDayIndex === 0 ? 6 : targetDayIndex - 1;
+              targetDate.setDate(targetWeekMonday.getDate() + dayOffset);
+              
+              const dateString = targetDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+              return (
+                <div key={daySchedule.day} className="bg-zinc-900 rounded-2xl p-5 mb-4 border border-zinc-800 hover:border-red-500 transition-all">
+                  <div className="flex justify-between items-center mb-4">
+                    <div>
+                      <div className="day-title text-2xl uppercase">{daySchedule.day}</div>
+                      <div className="text-zinc-500 text-sm">{dateString}</div>
+                    </div>
+                    <div className={`px-3 py-1.5 rounded-full text-xs font-bold uppercase ${
+                      isComplete 
+                        ? 'bg-green-500 text-white' 
+                        : 'bg-zinc-800 text-zinc-500'
+                    }`}>
+                      {isComplete ? 'Complete' : `${completedCount}/${daySchedule.workouts.length}`}
+                    </div>
+                  </div>
+                  {daySchedule.workouts.map((workout) => {
+                    const completed = isWorkoutCompleted(daySchedule.day, workout.name);
+                    return (
+                      <div key={workout.name} className="bg-white/5 rounded-xl p-3 mb-2 flex justify-between items-center">
+                        <div>
+                          <div className="font-semibold text-sm">{workout.name}</div>
+                          <div className="text-zinc-500 text-xs">{workout.time}</div>
+                        </div>
+                        <button 
+                          className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
+                            completed 
+                              ? 'bg-green-500 text-white' 
+                              : 'bg-red-500 text-white hover:bg-orange-500'
+                          }`}
+                          onClick={() => handleLogWorkout(daySchedule.day, workout.name)}
+                        >
+                          {completed ? '✓ Logged' : 'Log'}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </>
+        )}
+
+        {/* Progress Tab */}
+        {activeTab === 'progress' && (
+          <>
+            <div className="grid grid-cols-2 gap-4 mb-6">
+              <div className="bg-zinc-900 p-5 rounded-2xl border border-zinc-800">
+                <div className="text-zinc-500 text-xs font-semibold uppercase mb-2">Weight</div>
+                <div className="stat-value">{currentWeight}</div>
+              </div>
+              <div className="bg-zinc-900 p-5 rounded-2xl border border-zinc-800">
+                <div className="text-zinc-500 text-xs font-semibold uppercase mb-2">Body Fat %</div>
+                <div className="stat-value">{currentBodyFat}</div>
+              </div>
+            </div>
+
+            <div className="bg-zinc-900 rounded-2xl p-5 mb-6 border border-zinc-800">
+              <div className="mb-4">
+                <label className="block text-zinc-500 text-xs font-semibold uppercase mb-2">
+                  Current Weight (lbs)
+                </label>
+                <input 
+                  type="number" 
+                  value={weight}
+                  onChange={(e) => setWeight(e.target.value)}
+                  placeholder="Enter weight"
+                  className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-3 text-white font-semibold"
+                />
+              </div>
+              <div className="mb-4">
+                <label className="block text-zinc-500 text-xs font-semibold uppercase mb-2">
+                  Body Fat % (optional)
+                </label>
+                <input 
+                  type="number" 
+                  step="0.1"
+                  value={bodyFat}
+                  onChange={(e) => setBodyFat(e.target.value)}
+                  placeholder="Enter body fat %"
+                  className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-3 text-white font-semibold"
+                />
+              </div>
+              <button 
+                className="w-full bg-red-500 text-white py-4 rounded-xl font-bold text-sm uppercase tracking-wide hover:bg-orange-500 transition-all"
+                onClick={handleSaveWeight}
+              >
+                Save Progress
+              </button>
+            </div>
+
+            {weightHistory.length > 0 && (
+              <div>
+                <h3 className="text-lg font-bold mb-4">Weight History</h3>
+                {weightHistory.slice(0, 10).map((entry, index) => (
+                  <div key={index} className="bg-zinc-900 rounded-xl p-4 mb-3 border border-zinc-800">
+                    <div className="text-red-500 font-semibold text-sm mb-1">
+                      {new Date(entry.date).toLocaleDateString()}
+                    </div>
+                    <div className="text-zinc-500 text-sm">
+                      Weight: {entry.weight} lbs
+                      {entry.bodyFat && ` | Body Fat: ${entry.bodyFat}%`}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* History Tab */}
+        {activeTab === 'history' && (
+          <div>
+            <h3 className="text-lg font-bold mb-4">Workout History</h3>
+            {Object.entries(completedWorkouts)
+              .sort((a, b) => new Date(b[1].date) - new Date(a[1].date))
+              .slice(0, 20)
+              .map(([key, data]) => {
+                const [day, ...workoutParts] = key.split('-');
+                const workoutName = workoutParts.join('-');
+                return (
+                  <div key={key} className="bg-zinc-900 rounded-xl p-4 mb-3 border border-zinc-800">
+                    <div className="text-red-500 font-semibold text-sm mb-1">
+                      {new Date(data.date).toLocaleDateString()} - {day} - Week {data.week || '?'}
+                    </div>
+                    <div className="text-zinc-500 text-sm">
+                      {workoutName}
+                      {data.notes && !data.notes.startsWith('{') && ` | ${data.notes}`}
+                    </div>
+                  </div>
+                );
+              })}
+            {Object.keys(completedWorkouts).length === 0 && (
+              <p className="text-zinc-500 text-center py-10">
+                No workouts logged yet. Get started!
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Log Modal - This needs to be expanded with all workout variants */}
+        {showLogModal && (
+          <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-5" onClick={() => setShowLogModal(false)}>
+            <div className="bg-zinc-900 rounded-2xl p-6 max-w-md w-full border border-red-500 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <div className="day-title text-2xl uppercase mb-4">Log Workout</div>
+              <p className="text-zinc-500 mb-4">
+                {currentWorkout.workoutName} - {currentWorkout.day} - Week {currentWeek}
+              </p>
+              
+              {/* Zone 2 Cardio Modal */}
+              {currentWorkout.workoutName === 'Zone 2 Cardio' && (
+                <div className="mb-4">
+                  <label className="block text-zinc-500 text-xs font-semibold uppercase mb-2">
+                    Type
+                  </label>
+                  <div className="grid grid-cols-2 gap-2 mb-3">
+                    {['Rower', 'Incline Walk', 'Walk', 'Bike', 'Stepper', 'Ruck'].map(type => (
+                      <button
+                        key={type}
+                        onClick={() => setZone2Type(type)}
+                        className={`py-3 px-4 rounded-lg font-semibold text-sm transition-all ${
+                          zone2Type === type
+                            ? 'bg-red-500 text-white'
+                            : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
+                        }`}
+                      >
+                        {type}
+                      </button>
+                    ))}
+                  </div>
+                  
+                  <label className="block text-zinc-500 text-xs font-semibold uppercase mb-2">
+                    Duration
+                  </label>
+                  <div className="grid grid-cols-3 gap-2 mb-3">
+                    {['30 min', '45 min', '60 min'].map(dur => (
+                      <button
+                        key={dur}
+                        onClick={() => setZone2Duration(dur)}
+                        className={`py-3 px-4 rounded-lg font-semibold text-sm transition-all ${
+                          zone2Duration === dur
+                            ? 'bg-red-500 text-white'
+                            : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
+                        }`}
+                      >
+                        {dur}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Full Body Logging */}
+              {currentWorkout.workoutName === 'Full Body' && (
+                <div className="mb-4 max-h-96 overflow-y-auto">
+                  <div className="mb-4">
+                    <div className="text-red-500 font-bold text-sm mb-3 uppercase">Group A (3 sets each)</div>
+                    
+                    {/* Seated Rows */}
+                    <div className="mb-3 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Seated Rows (back)</div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          type="number"
+                          placeholder="Weight (lbs)"
+                          value={strengthWeights['seated_rows_weight'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'seated_rows_weight': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                        <input
+                          type="number"
+                          placeholder="Reps"
+                          value={strengthWeights['seated_rows_reps'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'seated_rows_reps': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Dips */}
+                    <div className="mb-3 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Dips (chest)</div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          type="number"
+                          placeholder="Weight (lbs)"
+                          value={strengthWeights['dips_weight'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'dips_weight': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                        <input
+                          type="number"
+                          placeholder="Reps"
+                          value={strengthWeights['dips_reps'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'dips_reps': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Dumbbell Press */}
+                    <div className="mb-3 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Dumbbell Press (shoulder)</div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          type="number"
+                          placeholder="Weight (lbs)"
+                          value={strengthWeights['dumbbell_press_weight'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'dumbbell_press_weight': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                        <input
+                          type="number"
+                          placeholder="Reps"
+                          value={strengthWeights['dumbbell_press_reps'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'dumbbell_press_reps': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Lunges */}
+                    <div className="mb-3 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Lunges (legs)</div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          type="number"
+                          placeholder="Weight (lbs)"
+                          value={strengthWeights['lunges_weight'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'lunges_weight': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                        <input
+                          type="number"
+                          placeholder="Reps"
+                          value={strengthWeights['lunges_reps'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'lunges_reps': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mb-4">
+                    <div className="text-orange-500 font-bold text-sm mb-3 uppercase">Group B (3 sets each)</div>
+                    
+                    {/* Lat Pull Down */}
+                    <div className="mb-3 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Lat Pull Down (back)</div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          type="number"
+                          placeholder="Weight (lbs)"
+                          value={strengthWeights['lat_pulldown_weight'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'lat_pulldown_weight': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                        <input
+                          type="number"
+                          placeholder="Reps"
+                          value={strengthWeights['lat_pulldown_reps'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'lat_pulldown_reps': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Dumbbell Bench */}
+                    <div className="mb-3 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Dumbbell Bench (chest)</div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          type="number"
+                          placeholder="Weight (lbs)"
+                          value={strengthWeights['dumbbell_bench_weight'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'dumbbell_bench_weight': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                        <input
+                          type="number"
+                          placeholder="Reps"
+                          value={strengthWeights['dumbbell_bench_reps'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'dumbbell_bench_reps': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Lateral Raises */}
+                    <div className="mb-3 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Lateral Raises (shoulder)</div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          type="number"
+                          placeholder="Weight (lbs)"
+                          value={strengthWeights['lateral_raises_weight'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'lateral_raises_weight': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                        <input
+                          type="number"
+                          placeholder="Reps"
+                          value={strengthWeights['lateral_raises_reps'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'lateral_raises_reps': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Hack Squat */}
+                    <div className="mb-3 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Hack Squat (legs)</div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          type="number"
+                          placeholder="Weight (lbs)"
+                          value={strengthWeights['hack_squat_weight'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'hack_squat_weight': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                        <input
+                          type="number"
+                          placeholder="Reps"
+                          value={strengthWeights['hack_squat_reps'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'hack_squat_reps': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mb-4">
+                    <div className="text-green-500 font-bold text-sm mb-3 uppercase">Group C (3 sets each)</div>
+                    
+                    {/* Face Pulls */}
+                    <div className="mb-3 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Face Pulls (back)</div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          type="number"
+                          placeholder="Weight (lbs)"
+                          value={strengthWeights['face_pulls_weight'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'face_pulls_weight': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                        <input
+                          type="number"
+                          placeholder="Reps"
+                          value={strengthWeights['face_pulls_reps'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'face_pulls_reps': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Cable Crossovers */}
+                    <div className="mb-3 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Cable Crossovers (chest)</div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          type="number"
+                          placeholder="Weight (lbs)"
+                          value={strengthWeights['cable_crossovers_weight'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'cable_crossovers_weight': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                        <input
+                          type="number"
+                          placeholder="Reps"
+                          value={strengthWeights['cable_crossovers_reps'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'cable_crossovers_reps': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Cheat Side Raises */}
+                    <div className="mb-3 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Cheat Side Raises (shoulder)</div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          type="number"
+                          placeholder="Weight (lbs)"
+                          value={strengthWeights['cheat_side_raises_weight'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'cheat_side_raises_weight': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                        <input
+                          type="number"
+                          placeholder="Reps"
+                          value={strengthWeights['cheat_side_raises_reps'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'cheat_side_raises_reps': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Hamstring Curls */}
+                    <div className="mb-3 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Hamstring Curls (legs)</div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          type="number"
+                          placeholder="Weight (lbs)"
+                          value={strengthWeights['hamstring_curls_weight'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'hamstring_curls_weight': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                        <input
+                          type="number"
+                          placeholder="Reps"
+                          value={strengthWeights['hamstring_curls_reps'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'hamstring_curls_reps': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Lower A Logging */}
+              {currentWorkout.workoutName === 'Lower A' && (
+                <div className="mb-4 max-h-96 overflow-y-auto">
+                  <div className="mb-4">
+                    <div className="text-red-500 font-bold text-sm mb-3 uppercase">Group A</div>
+                    
+                    {/* Intensity Squat */}
+                    <div className="mb-4 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Intensity Squat</div>
+                      <div className="text-zinc-500 text-xs mb-2">
+                        {getProgressionWeight(315, currentWeek, cycleOffset)} lbs: 1×max + 2×5@{Math.round(getProgressionWeight(315, currentWeek, cycleOffset) * 0.9)} lbs
+                      </div>
+                      <div className="mb-2">
+                        <label className="block text-zinc-400 text-xs mb-1">Top Set Reps</label>
+                        <input
+                          type="number"
+                          placeholder="Max reps"
+                          value={strengthWeights['intensity_squat_reps'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'intensity_squat_reps': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                      </div>
+                      <div className="text-zinc-500 text-xs">Back-offs: 2×5 at 90%</div>
+                    </div>
+
+                    {/* Speed Pull */}
+                    <div className="mb-4 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Speed Pull</div>
+                      <div className="text-zinc-500 text-xs mb-2">
+                        {currentWeek === 1 && `${getProgressionWeight(290, currentWeek, cycleOffset)} lbs: 5 sets × 4 reps`}
+                        {currentWeek === 3 && `${getProgressionWeight(315, currentWeek, cycleOffset)} lbs: 5 sets × 3 reps`}
+                        {currentWeek === 5 && `${getProgressionWeight(340, currentWeek, cycleOffset)} lbs: 5 sets × 2 reps`}
+                        {currentWeek === 7 && `${getProgressionWeight(365, currentWeek, cycleOffset)} lbs: 10 sets × 1 rep`}
+                      </div>
+                      <div className="text-green-500 text-xs">✓ Pre-programmed</div>
+                    </div>
+
+                    {/* Barbell Rows */}
+                    <div className="mb-3 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Barbell Rows (3×failure)</div>
+                      <div className="mb-2">
+                        <label className="block text-zinc-400 text-xs mb-1">Weight (all sets)</label>
+                        <input
+                          type="number"
+                          placeholder="Weight (lbs)"
+                          value={strengthWeights['barbell_rows_weight'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'barbell_rows_weight': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                      </div>
+                      {[1, 2, 3].map((set) => (
+                        <div key={set} className="mb-2">
+                          <label className="block text-zinc-400 text-xs mb-1">Set {set} Reps</label>
+                          <input
+                            type="number"
+                            placeholder="Reps"
+                            value={strengthWeights[`barbell_rows_set${set}_reps`] || ''}
+                            onChange={(e) => setStrengthWeights({...strengthWeights, [`barbell_rows_set${set}_reps`]: e.target.value})}
+                            className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="mb-4">
+                    <div className="text-orange-500 font-bold text-sm mb-3 uppercase">Group B</div>
+                    
+                    {/* Belt Squats */}
+                    <div className="mb-3 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Belt Squats (2×10-15)</div>
+                      <div className="mb-2">
+                        <label className="block text-zinc-400 text-xs mb-1">Weight (all sets)</label>
+                        <input
+                          type="number"
+                          placeholder="Weight (lbs)"
+                          value={strengthWeights['belt_squats_weight'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'belt_squats_weight': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                      </div>
+                      {[1, 2].map((set) => (
+                        <div key={set} className="mb-2">
+                          <label className="block text-zinc-400 text-xs mb-1">Set {set} Reps</label>
+                          <input
+                            type="number"
+                            placeholder="Reps"
+                            value={strengthWeights[`belt_squats_set${set}_reps`] || ''}
+                            onChange={(e) => setStrengthWeights({...strengthWeights, [`belt_squats_set${set}_reps`]: e.target.value})}
+                            className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                          />
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Dumbbell Rows */}
+                    <div className="mb-3 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Dumbbell Rows (2 sets)</div>
+                      <div className="mb-2">
+                        <label className="block text-zinc-400 text-xs mb-1">Weight (all sets)</label>
+                        <input
+                          type="number"
+                          placeholder="Weight (lbs)"
+                          value={strengthWeights['dumbbell_rows_weight'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'dumbbell_rows_weight': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                      </div>
+                      {[1, 2].map((set) => (
+                        <div key={set} className="mb-2">
+                          <label className="block text-zinc-400 text-xs mb-1">Set {set} Reps</label>
+                          <input
+                            type="number"
+                            placeholder="Reps"
+                            value={strengthWeights[`dumbbell_rows_set${set}_reps`] || ''}
+                            onChange={(e) => setStrengthWeights({...strengthWeights, [`dumbbell_rows_set${set}_reps`]: e.target.value})}
+                            className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                          />
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Banded Pull-Ups */}
+                    <div className="mb-3 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Banded Pull-Ups (2 sets)</div>
+                      {[1, 2].map((set) => (
+                        <div key={set} className="mb-2">
+                          <label className="block text-zinc-400 text-xs mb-1">Set {set} Reps</label>
+                          <input
+                            type="number"
+                            placeholder="Reps"
+                            value={strengthWeights[`banded_pullups_set${set}_reps`] || ''}
+                            onChange={(e) => setStrengthWeights({...strengthWeights, [`banded_pullups_set${set}_reps`]: e.target.value})}
+                            className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Lower B Logging */}
+              {currentWorkout.workoutName === 'Lower B' && (
+                <div className="mb-4 max-h-96 overflow-y-auto">
+                  <div className="mb-4">
+                    <div className="text-red-500 font-bold text-sm mb-3 uppercase">Group A</div>
+                    
+                    {/* Intensity Pull */}
+                    <div className="mb-4 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Intensity Pull</div>
+                      <div className="text-zinc-500 text-xs mb-2">
+                        {getProgressionWeight(365, currentWeek, cycleOffset)} lbs: 1×max + 2 RDLs×5@{Math.round(getProgressionWeight(365, currentWeek, cycleOffset) * 0.8)} lbs
+                      </div>
+                      <div className="mb-2">
+                        <label className="block text-zinc-400 text-xs mb-1">Top Set Reps</label>
+                        <input
+                          type="number"
+                          placeholder="Max reps"
+                          value={strengthWeights['intensity_pull_reps'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'intensity_pull_reps': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                      </div>
+                      <div className="text-zinc-500 text-xs">Back-off RDLs: 2×5 at 80%</div>
+                    </div>
+
+                    {/* Speed Squat */}
+                    <div className="mb-4 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Speed Squat</div>
+                      <div className="text-zinc-500 text-xs mb-2">
+                        {currentWeek === 2 && `${getProgressionWeight(265, currentWeek, cycleOffset)} lbs: 5 sets × 5 reps`}
+                        {currentWeek === 4 && `${getProgressionWeight(285, currentWeek, cycleOffset)} lbs: 5 sets × 5 reps`}
+                        {currentWeek === 6 && `${getProgressionWeight(305, currentWeek, cycleOffset)} lbs: 8 sets × 3 reps`}
+                        {currentWeek === 8 && `${getProgressionWeight(325, currentWeek, cycleOffset)} lbs: 10 sets × 2 reps`}
+                      </div>
+                      <div className="text-green-500 text-xs">✓ Pre-programmed</div>
+                    </div>
+
+                    {/* Barbell Rows */}
+                    <div className="mb-3 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Barbell Rows (3×failure)</div>
+                      <div className="mb-2">
+                        <label className="block text-zinc-400 text-xs mb-1">Weight (all sets)</label>
+                        <input
+                          type="number"
+                          placeholder="Weight (lbs)"
+                          value={strengthWeights['barbell_rows_weight'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'barbell_rows_weight': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                      </div>
+                      {[1, 2, 3].map((set) => (
+                        <div key={set} className="mb-2">
+                          <label className="block text-zinc-400 text-xs mb-1">Set {set} Reps</label>
+                          <input
+                            type="number"
+                            placeholder="Reps"
+                            value={strengthWeights[`barbell_rows_set${set}_reps`] || ''}
+                            onChange={(e) => setStrengthWeights({...strengthWeights, [`barbell_rows_set${set}_reps`]: e.target.value})}
+                            className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="mb-4">
+                    <div className="text-orange-500 font-bold text-sm mb-3 uppercase">Group B</div>
+                    
+                    {/* Nordic Curls */}
+                    <div className="mb-3 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Nordic Curls (2 sets)</div>
+                      {[1, 2].map((set) => (
+                        <div key={set} className="mb-2">
+                          <label className="block text-zinc-400 text-xs mb-1">Set {set} Reps</label>
+                          <input
+                            type="number"
+                            placeholder="Reps"
+                            value={strengthWeights[`nordic_curls_set${set}_reps`] || ''}
+                            onChange={(e) => setStrengthWeights({...strengthWeights, [`nordic_curls_set${set}_reps`]: e.target.value})}
+                            className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                          />
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Dumbbell Rows */}
+                    <div className="mb-3 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Dumbbell Rows (2 sets)</div>
+                      <div className="mb-2">
+                        <label className="block text-zinc-400 text-xs mb-1">Weight (all sets)</label>
+                        <input
+                          type="number"
+                          placeholder="Weight (lbs)"
+                          value={strengthWeights['dumbbell_rows_weight'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'dumbbell_rows_weight': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                      </div>
+                      {[1, 2].map((set) => (
+                        <div key={set} className="mb-2">
+                          <label className="block text-zinc-400 text-xs mb-1">Set {set} Reps</label>
+                          <input
+                            type="number"
+                            placeholder="Reps"
+                            value={strengthWeights[`dumbbell_rows_set${set}_reps`] || ''}
+                            onChange={(e) => setStrengthWeights({...strengthWeights, [`dumbbell_rows_set${set}_reps`]: e.target.value})}
+                            className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                          />
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Banded Pull-Ups */}
+                    <div className="mb-3 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Banded Pull-Ups (2 sets)</div>
+                      {[1, 2].map((set) => (
+                        <div key={set} className="mb-2">
+                          <label className="block text-zinc-400 text-xs mb-1">Set {set} Reps</label>
+                          <input
+                            type="number"
+                            placeholder="Reps"
+                            value={strengthWeights[`banded_pullups_set${set}_reps`] || ''}
+                            onChange={(e) => setStrengthWeights({...strengthWeights, [`banded_pullups_set${set}_reps`]: e.target.value})}
+                            className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Upper workouts placeholder */}
+              {currentWorkout.workoutName === 'Upper A' && (
+                <div className="mb-4 max-h-96 overflow-y-auto">
+                  <div className="mb-4">
+                    <div className="text-red-500 font-bold text-sm mb-3 uppercase">Group A</div>
+                    
+                    {/* Speed Bench */}
+                    <div className="mb-4 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Speed Bench</div>
+                      <div className="text-zinc-500 text-xs mb-2">
+                        {currentWeek === 1 && `${getProgressionWeight(195, currentWeek, cycleOffset)} lbs: 10 sets × 3 reps`}
+                        {currentWeek === 3 && `${getProgressionWeight(210, currentWeek, cycleOffset)} lbs: 10 sets × 3 reps`}
+                        {currentWeek === 5 && `${getProgressionWeight(225, currentWeek, cycleOffset)} lbs: 10 sets × 3 reps`}
+                        {currentWeek === 7 && `${getProgressionWeight(240, currentWeek, cycleOffset)} lbs: 10 sets × 3 reps`}
+                      </div>
+                      <div className="text-green-500 text-xs">✓ Pre-programmed</div>
+                    </div>
+
+                    {/* Weighted Dips */}
+                    <div className="mb-3 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Weighted Dips (3 sets)</div>
+                      <div className="mb-2">
+                        <label className="block text-zinc-400 text-xs mb-1">Weight (all sets)</label>
+                        <input
+                          type="number"
+                          placeholder="Weight (lbs)"
+                          value={strengthWeights['weighted_dips_weight'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'weighted_dips_weight': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                      </div>
+                      {[1, 2, 3].map((set) => (
+                        <div key={set} className="mb-2">
+                          <label className="block text-zinc-400 text-xs mb-1">Set {set} Reps</label>
+                          <input
+                            type="number"
+                            placeholder="Reps"
+                            value={strengthWeights[`weighted_dips_set${set}_reps`] || ''}
+                            onChange={(e) => setStrengthWeights({...strengthWeights, [`weighted_dips_set${set}_reps`]: e.target.value})}
+                            className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                          />
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Dumbbell Press */}
+                    <div className="mb-3 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Dumbbell Press (3 sets)</div>
+                      <div className="mb-2">
+                        <label className="block text-zinc-400 text-xs mb-1">Weight (all sets)</label>
+                        <input
+                          type="number"
+                          placeholder="Weight (lbs)"
+                          value={strengthWeights['dumbbell_press_ua_weight'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'dumbbell_press_ua_weight': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                      </div>
+                      {[1, 2, 3].map((set) => (
+                        <div key={set} className="mb-2">
+                          <label className="block text-zinc-400 text-xs mb-1">Set {set} Reps</label>
+                          <input
+                            type="number"
+                            placeholder="Reps"
+                            value={strengthWeights[`dumbbell_press_ua_set${set}_reps`] || ''}
+                            onChange={(e) => setStrengthWeights({...strengthWeights, [`dumbbell_press_ua_set${set}_reps`]: e.target.value})}
+                            className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="mb-4">
+                    <div className="text-orange-500 font-bold text-sm mb-3 uppercase">Group B</div>
+                    
+                    {/* Lying Tricep Extensions */}
+                    <div className="mb-3 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Lying Tricep Extensions (3 sets)</div>
+                      <div className="mb-2">
+                        <label className="block text-zinc-400 text-xs mb-1">Weight (all sets)</label>
+                        <input
+                          type="number"
+                          placeholder="Weight (lbs)"
+                          value={strengthWeights['lying_tricep_ext_weight'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'lying_tricep_ext_weight': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                      </div>
+                      {[1, 2, 3].map((set) => (
+                        <div key={set} className="mb-2">
+                          <label className="block text-zinc-400 text-xs mb-1">Set {set} Reps</label>
+                          <input
+                            type="number"
+                            placeholder="Reps"
+                            value={strengthWeights[`lying_tricep_ext_set${set}_reps`] || ''}
+                            onChange={(e) => setStrengthWeights({...strengthWeights, [`lying_tricep_ext_set${set}_reps`]: e.target.value})}
+                            className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                          />
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Banded Lateral Raises */}
+                    <div className="mb-3 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Banded Lateral Raises (3 sets)</div>
+                      {[1, 2, 3].map((set) => (
+                        <div key={set} className="mb-2">
+                          <label className="block text-zinc-400 text-xs mb-1">Set {set} Reps</label>
+                          <input
+                            type="number"
+                            placeholder="Reps"
+                            value={strengthWeights[`banded_lateral_raises_set${set}_reps`] || ''}
+                            onChange={(e) => setStrengthWeights({...strengthWeights, [`banded_lateral_raises_set${set}_reps`]: e.target.value})}
+                            className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                          />
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Banded Side Raises */}
+                    <div className="mb-3 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Banded Side Raises (3 sets)</div>
+                      {[1, 2, 3].map((set) => (
+                        <div key={set} className="mb-2">
+                          <label className="block text-zinc-400 text-xs mb-1">Set {set} Reps</label>
+                          <input
+                            type="number"
+                            placeholder="Reps"
+                            value={strengthWeights[`banded_side_raises_set${set}_reps`] || ''}
+                            onChange={(e) => setStrengthWeights({...strengthWeights, [`banded_side_raises_set${set}_reps`]: e.target.value})}
+                            className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Upper B Logging */}
+              {currentWorkout.workoutName === 'Upper B' && (
+                <div className="mb-4 max-h-96 overflow-y-auto">
+                  <div className="mb-4">
+                    <div className="text-red-500 font-bold text-sm mb-3 uppercase">Group A</div>
+                    
+                    {/* Intensity Bench */}
+                    <div className="mb-4 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Intensity Bench</div>
+                      <div className="text-zinc-500 text-xs mb-2">
+                        {getProgressionWeight(230, currentWeek, cycleOffset)} lbs: 1×max + 2×5@{Math.round(getProgressionWeight(230, currentWeek, cycleOffset) * 0.85)} lbs
+                      </div>
+                      <div className="mb-2">
+                        <label className="block text-zinc-400 text-xs mb-1">Top Set Reps</label>
+                        <input
+                          type="number"
+                          placeholder="Max reps"
+                          value={strengthWeights['intensity_bench_reps'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'intensity_bench_reps': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                      </div>
+                      <div className="text-zinc-500 text-xs">Back-offs: 2×5 at 85%</div>
+                    </div>
+
+                    {/* Barbell Press - 10 rep accumulation */}
+                    <div className="mb-3 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Barbell Press</div>
+                      <div className="text-zinc-500 text-xs mb-2">Accumulate 10 total reps</div>
+                      <div className="mb-2">
+                        <label className="block text-zinc-400 text-xs mb-1">Weight</label>
+                        <input
+                          type="number"
+                          placeholder="Weight (lbs)"
+                          value={strengthWeights['barbell_press_weight'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'barbell_press_weight': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                      </div>
+                      <div className="mb-2">
+                        <label className="block text-zinc-400 text-xs mb-1">Sets Needed</label>
+                        <input
+                          type="number"
+                          placeholder="How many sets for 10 reps?"
+                          value={strengthWeights['barbell_press_sets'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'barbell_press_sets': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Incline Dumbbell Bench Press */}
+                    <div className="mb-3 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Incline Dumbbell Bench Press (3 sets)</div>
+                      <div className="mb-2">
+                        <label className="block text-zinc-400 text-xs mb-1">Weight (all sets)</label>
+                        <input
+                          type="number"
+                          placeholder="Weight (lbs)"
+                          value={strengthWeights['incline_db_bench_weight'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'incline_db_bench_weight': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                      </div>
+                      {[1, 2, 3].map((set) => (
+                        <div key={set} className="mb-2">
+                          <label className="block text-zinc-400 text-xs mb-1">Set {set} Reps</label>
+                          <input
+                            type="number"
+                            placeholder="Reps"
+                            value={strengthWeights[`incline_db_bench_set${set}_reps`] || ''}
+                            onChange={(e) => setStrengthWeights({...strengthWeights, [`incline_db_bench_set${set}_reps`]: e.target.value})}
+                            className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="mb-4">
+                    <div className="text-orange-500 font-bold text-sm mb-3 uppercase">Group B</div>
+                    
+                    {/* Bicep Curls */}
+                    <div className="mb-3 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Bicep Curls (3 sets)</div>
+                      <div className="mb-2">
+                        <label className="block text-zinc-400 text-xs mb-1">Weight (all sets)</label>
+                        <input
+                          type="number"
+                          placeholder="Weight (lbs)"
+                          value={strengthWeights['bicep_curls_weight'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'bicep_curls_weight': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                      </div>
+                      {[1, 2, 3].map((set) => (
+                        <div key={set} className="mb-2">
+                          <label className="block text-zinc-400 text-xs mb-1">Set {set} Reps</label>
+                          <input
+                            type="number"
+                            placeholder="Reps"
+                            value={strengthWeights[`bicep_curls_set${set}_reps`] || ''}
+                            onChange={(e) => setStrengthWeights({...strengthWeights, [`bicep_curls_set${set}_reps`]: e.target.value})}
+                            className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                          />
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Banded Lateral Raises */}
+                    <div className="mb-3 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Banded Lateral Raises (3 sets)</div>
+                      {[1, 2, 3].map((set) => (
+                        <div key={set} className="mb-2">
+                          <label className="block text-zinc-400 text-xs mb-1">Set {set} Reps</label>
+                          <input
+                            type="number"
+                            placeholder="Reps"
+                            value={strengthWeights[`banded_lateral_raises_ub_set${set}_reps`] || ''}
+                            onChange={(e) => setStrengthWeights({...strengthWeights, [`banded_lateral_raises_ub_set${set}_reps`]: e.target.value})}
+                            className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                          />
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Banded Side Raises */}
+                    <div className="mb-3 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Banded Side Raises (3 sets)</div>
+                      {[1, 2, 3].map((set) => (
+                        <div key={set} className="mb-2">
+                          <label className="block text-zinc-400 text-xs mb-1">Set {set} Reps</label>
+                          <input
+                            type="number"
+                            placeholder="Reps"
+                            value={strengthWeights[`banded_side_raises_ub_set${set}_reps`] || ''}
+                            onChange={(e) => setStrengthWeights({...strengthWeights, [`banded_side_raises_ub_set${set}_reps`]: e.target.value})}
+                            className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Deload workouts */}
+              {currentWorkout.workoutName === 'Lower Deload' && (
+                <div className="mb-4 max-h-96 overflow-y-auto">
+                  <div className="text-orange-500 text-sm mb-3 font-semibold">Week 9 - Lower Deload</div>
+                  
+                  <div className="mb-4">
+                    <div className="text-red-500 font-bold text-sm mb-3 uppercase">Group A</div>
+                    
+                    {/* Intensity Squat - Deload */}
+                    <div className="mb-4 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Intensity Squat (Deload)</div>
+                      <div className="text-zinc-500 text-xs mb-2">285 lbs: 2 sets × 5 reps (easy)</div>
+                      <div className="text-green-500 text-xs">✓ Fixed deload weight</div>
+                    </div>
+
+                    {/* Barbell Rows */}
+                    <div className="mb-3 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Barbell Rows (2 sets, 8-10 reps)</div>
+                      <div className="mb-2">
+                        <label className="block text-zinc-400 text-xs mb-1">Weight (all sets)</label>
+                        <input
+                          type="number"
+                          placeholder="Weight (lbs)"
+                          value={strengthWeights['barbell_rows_deload_weight'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'barbell_rows_deload_weight': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                      </div>
+                      {[1, 2].map((set) => (
+                        <div key={set} className="mb-2">
+                          <label className="block text-zinc-400 text-xs mb-1">Set {set} Reps</label>
+                          <input
+                            type="number"
+                            placeholder="Reps"
+                            value={strengthWeights[`barbell_rows_deload_set${set}_reps`] || ''}
+                            onChange={(e) => setStrengthWeights({...strengthWeights, [`barbell_rows_deload_set${set}_reps`]: e.target.value})}
+                            className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                          />
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* RDLs */}
+                    <div className="mb-4 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">RDLs (Deload)</div>
+                      <div className="text-zinc-500 text-xs mb-2">285 lbs: 2 sets × 5 reps (easy)</div>
+                      <div className="text-green-500 text-xs">✓ Fixed deload weight</div>
+                    </div>
+                  </div>
+
+                  <div className="mb-4">
+                    <div className="text-orange-500 font-bold text-sm mb-3 uppercase">Group B</div>
+                    
+                    {/* Belt Squats */}
+                    <div className="mb-3 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Belt Squats (1 set, 10 reps)</div>
+                      <div className="mb-2">
+                        <label className="block text-zinc-400 text-xs mb-1">Weight</label>
+                        <input
+                          type="number"
+                          placeholder="Weight (lbs)"
+                          value={strengthWeights['belt_squats_deload_weight'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'belt_squats_deload_weight': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                      </div>
+                      <div className="mb-2">
+                        <label className="block text-zinc-400 text-xs mb-1">Reps</label>
+                        <input
+                          type="number"
+                          placeholder="Reps"
+                          value={strengthWeights['belt_squats_deload_reps'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'belt_squats_deload_reps': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Dumbbell Rows */}
+                    <div className="mb-3 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Dumbbell Rows (1 set, 8-10 reps)</div>
+                      <div className="mb-2">
+                        <label className="block text-zinc-400 text-xs mb-1">Weight</label>
+                        <input
+                          type="number"
+                          placeholder="Weight (lbs)"
+                          value={strengthWeights['dumbbell_rows_deload_weight'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'dumbbell_rows_deload_weight': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                      </div>
+                      <div className="mb-2">
+                        <label className="block text-zinc-400 text-xs mb-1">Reps</label>
+                        <input
+                          type="number"
+                          placeholder="Reps"
+                          value={strengthWeights['dumbbell_rows_deload_reps'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'dumbbell_rows_deload_reps': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Banded Pull-Ups */}
+                    <div className="mb-3 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Banded Pull-Ups (1 set, 8-10 reps)</div>
+                      <div className="mb-2">
+                        <label className="block text-zinc-400 text-xs mb-1">Reps</label>
+                        <input
+                          type="number"
+                          placeholder="Reps"
+                          value={strengthWeights['banded_pullups_deload_reps'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'banded_pullups_deload_reps': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {currentWorkout.workoutName === 'Upper Deload' && (
+                <div className="mb-4 max-h-96 overflow-y-auto">
+                  <div className="text-orange-500 text-sm mb-3 font-semibold">Week 9 - Upper Deload</div>
+                  
+                  <div className="mb-4">
+                    <div className="text-red-500 font-bold text-sm mb-3 uppercase">Group A</div>
+                    
+                    {/* Intensity Bench - Deload */}
+                    <div className="mb-4 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Intensity Bench (Deload)</div>
+                      <div className="text-zinc-500 text-xs mb-2">196 lbs: 2 sets × 5 reps (easy)</div>
+                      <div className="text-green-500 text-xs">✓ Fixed deload weight</div>
+                    </div>
+
+                    {/* Barbell Press */}
+                    <div className="mb-3 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Barbell Press (2 sets, 8-10 reps)</div>
+                      <div className="mb-2">
+                        <label className="block text-zinc-400 text-xs mb-1">Weight (all sets)</label>
+                        <input
+                          type="number"
+                          placeholder="Weight (lbs)"
+                          value={strengthWeights['barbell_press_deload_weight'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'barbell_press_deload_weight': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                      </div>
+                      {[1, 2].map((set) => (
+                        <div key={set} className="mb-2">
+                          <label className="block text-zinc-400 text-xs mb-1">Set {set} Reps</label>
+                          <input
+                            type="number"
+                            placeholder="Reps"
+                            value={strengthWeights[`barbell_press_deload_set${set}_reps`] || ''}
+                            onChange={(e) => setStrengthWeights({...strengthWeights, [`barbell_press_deload_set${set}_reps`]: e.target.value})}
+                            className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                          />
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Incline Dumbbell Bench */}
+                    <div className="mb-3 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Incline Dumbbell Bench (2 sets, 8-10 reps)</div>
+                      <div className="mb-2">
+                        <label className="block text-zinc-400 text-xs mb-1">Weight (all sets)</label>
+                        <input
+                          type="number"
+                          placeholder="Weight (lbs)"
+                          value={strengthWeights['incline_db_deload_weight'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'incline_db_deload_weight': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                      </div>
+                      {[1, 2].map((set) => (
+                        <div key={set} className="mb-2">
+                          <label className="block text-zinc-400 text-xs mb-1">Set {set} Reps</label>
+                          <input
+                            type="number"
+                            placeholder="Reps"
+                            value={strengthWeights[`incline_db_deload_set${set}_reps`] || ''}
+                            onChange={(e) => setStrengthWeights({...strengthWeights, [`incline_db_deload_set${set}_reps`]: e.target.value})}
+                            className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="mb-4">
+                    <div className="text-orange-500 font-bold text-sm mb-3 uppercase">Group B</div>
+                    
+                    {/* Dips */}
+                    <div className="mb-3 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Dips (2 sets, 8-10 reps)</div>
+                      <div className="mb-2">
+                        <label className="block text-zinc-400 text-xs mb-1">Weight (all sets)</label>
+                        <input
+                          type="number"
+                          placeholder="Weight (lbs)"
+                          value={strengthWeights['dips_deload_weight'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'dips_deload_weight': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                      </div>
+                      {[1, 2].map((set) => (
+                        <div key={set} className="mb-2">
+                          <label className="block text-zinc-400 text-xs mb-1">Set {set} Reps</label>
+                          <input
+                            type="number"
+                            placeholder="Reps"
+                            value={strengthWeights[`dips_deload_set${set}_reps`] || ''}
+                            onChange={(e) => setStrengthWeights({...strengthWeights, [`dips_deload_set${set}_reps`]: e.target.value})}
+                            className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                          />
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Lying Tricep Extensions */}
+                    <div className="mb-3 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Lying Tricep Extensions (2 sets, 10 reps)</div>
+                      <div className="mb-2">
+                        <label className="block text-zinc-400 text-xs mb-1">Weight (all sets)</label>
+                        <input
+                          type="number"
+                          placeholder="Weight (lbs)"
+                          value={strengthWeights['tricep_ext_deload_weight'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'tricep_ext_deload_weight': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                      </div>
+                      {[1, 2].map((set) => (
+                        <div key={set} className="mb-2">
+                          <label className="block text-zinc-400 text-xs mb-1">Set {set} Reps</label>
+                          <input
+                            type="number"
+                            placeholder="Reps"
+                            value={strengthWeights[`tricep_ext_deload_set${set}_reps`] || ''}
+                            onChange={(e) => setStrengthWeights({...strengthWeights, [`tricep_ext_deload_set${set}_reps`]: e.target.value})}
+                            className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                          />
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Bicep Curls */}
+                    <div className="mb-3 bg-white/5 p-3 rounded-lg">
+                      <div className="text-zinc-300 font-semibold text-sm mb-2">Bicep Curls (2 sets, 10 reps)</div>
+                      <div className="mb-2">
+                        <label className="block text-zinc-400 text-xs mb-1">Weight (all sets)</label>
+                        <input
+                          type="number"
+                          placeholder="Weight (lbs)"
+                          value={strengthWeights['bicep_curls_deload_weight'] || ''}
+                          onChange={(e) => setStrengthWeights({...strengthWeights, 'bicep_curls_deload_weight': e.target.value})}
+                          className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                      </div>
+                      {[1, 2].map((set) => (
+                        <div key={set} className="mb-2">
+                          <label className="block text-zinc-400 text-xs mb-1">Set {set} Reps</label>
+                          <input
+                            type="number"
+                            placeholder="Reps"
+                            value={strengthWeights[`bicep_curls_deload_set${set}_reps`] || ''}
+                            onChange={(e) => setStrengthWeights({...strengthWeights, [`bicep_curls_deload_set${set}_reps`]: e.target.value})}
+                            className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Notes field for all workouts */}
+              <div className="mb-4">
+                <label className="block text-zinc-500 text-xs font-semibold uppercase mb-2">
+                  Notes (optional)
+                </label>
+                <input 
+                  type="text"
+                  value={workoutNotes}
+                  onChange={(e) => setWorkoutNotes(e.target.value)}
+                  placeholder="Add any notes..."
+                  className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-3 text-white"
+                />
+              </div>
+
+              <button 
+                className="w-full bg-red-500 text-white py-4 rounded-xl font-bold text-sm uppercase tracking-wide mb-3"
+                onClick={confirmLogWorkout}
+              >
+                Confirm
+              </button>
+              <button 
+                className="w-full bg-zinc-800 text-white py-3 rounded-lg font-semibold"
+                onClick={() => setShowLogModal(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Quick Log Modal */}
+        {showQuickLog && (
+          <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-5" onClick={() => setShowQuickLog(false)}>
+            <div className="bg-zinc-900 rounded-2xl p-6 max-w-md w-full border border-red-500 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <div className="day-title text-2xl uppercase mb-4">Quick Log Cardio</div>
+              <p className="text-zinc-500 mb-4">
+                Log an off-schedule cardio session
+              </p>
+              
+              <div className="mb-4">
+                <label className="block text-zinc-500 text-xs font-semibold uppercase mb-2">
+                  Date
+                </label>
+                <input 
+                  type="date"
+                  value={quickLogDate}
+                  onChange={(e) => setQuickLogDate(e.target.value)}
+                  className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-3 text-white font-semibold"
+                />
+              </div>
+
+              <label className="block text-zinc-500 text-xs font-semibold uppercase mb-2">
+                Type
+              </label>
+              <div className="grid grid-cols-2 gap-2 mb-3">
+                {['Rower', 'Incline Walk', 'Walk', 'Bike', 'Stepper', 'Ruck'].map(type => (
+                  <button
+                    key={type}
+                    onClick={() => setZone2Type(type)}
+                    className={`py-3 px-4 rounded-lg font-semibold text-sm transition-all ${
+                      zone2Type === type
+                        ? 'bg-red-500 text-white'
+                        : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
+                    }`}
+                  >
+                    {type}
+                  </button>
+                ))}
+              </div>
+              
+              <label className="block text-zinc-500 text-xs font-semibold uppercase mb-2">
+                Duration
+              </label>
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                {['30 min', '45 min', '60 min'].map(dur => (
+                  <button
+                    key={dur}
+                    onClick={() => setZone2Duration(dur)}
+                    className={`py-3 px-4 rounded-lg font-semibold text-sm transition-all ${
+                      zone2Duration === dur
+                        ? 'bg-red-500 text-white'
+                        : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
+                    }`}
+                  >
+                    {dur}
+                  </button>
+                ))}
+              </div>
+
+              <div className="mb-4">
+                <label className="block text-zinc-500 text-xs font-semibold uppercase mb-2">
+                  Notes (optional)
+                </label>
+                <input 
+                  type="text"
+                  value={workoutNotes}
+                  onChange={(e) => setWorkoutNotes(e.target.value)}
+                  placeholder="Add any notes..."
+                  className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-3 text-white"
+                />
+              </div>
+
+              <button 
+                className="w-full bg-red-500 text-white py-4 rounded-xl font-bold text-sm uppercase tracking-wide mb-3"
+                onClick={() => {
+                  const logDate = quickLogDate ? new Date(quickLogDate + 'T12:00:00') : new Date();
+                  const dayName = logDate.toLocaleDateString('en-US', { weekday: 'long' });
+                  
+                  const parts = [];
+                  if (zone2Type) parts.push(zone2Type);
+                  if (zone2Duration) parts.push(zone2Duration);
+                  if (workoutNotes) parts.push(workoutNotes);
+                  const notes = parts.join(' | ');
+                  
+                  const key = `${dayName}-Extra Cardio-${logDate.toISOString()}`;
+                  const newCompleted = {
+                    ...completedWorkouts,
+                    [key]: {
+                      date: logDate.toISOString(),
+                      notes: notes,
+                      week: currentWeek
+                    }
+                  };
+                  setCompletedWorkouts(newCompleted);
+                  saveCompletedWorkouts(newCompleted);
+                  setShowQuickLog(false);
+                  setWorkoutNotes('');
+                  setZone2Type('');
+                  setZone2Duration('');
+                  setQuickLogDate('');
+                }}
+              >
+                Confirm
+              </button>
+              <button 
+                className="w-full bg-zinc-800 text-white py-3 rounded-lg font-semibold"
+                onClick={() => {
+                  setShowQuickLog(false);
+                  setWorkoutNotes('');
+                  setZone2Type('');
+                  setZone2Duration('');
+                  setQuickLogDate('');
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
