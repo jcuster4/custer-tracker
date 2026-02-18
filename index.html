@@ -1,4 +1,20 @@
-import React, { useState, useEffect } from 'react';
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Custer Tracker</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Anton&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
 
 // Helper function to get workout variant based on week
 function getWeekVariant(week) {
@@ -17,7 +33,6 @@ function getProgressionWeight(baseWeight, week, cycleOffset = 0) {
   return adjustedWeight;
 }
 
-export default function WorkoutTracker() {
   const [activeTab, setActiveTab] = useState('schedule');
   const [completedWorkouts, setCompletedWorkouts] = useState({});
   const [weight, setWeight] = useState('');
@@ -1896,3 +1911,8 @@ export default function WorkoutTracker() {
     </div>
   );
 }
+
+        ReactDOM.render(<WorkoutTracker />, document.getElementById('root'));
+    </script>
+</body>
+</html>
