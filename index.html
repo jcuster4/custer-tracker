@@ -33,6 +33,7 @@ function getProgressionWeight(baseWeight, week, cycleOffset = 0) {
   return adjustedWeight;
 }
 
+function WorkoutTracker() {
   const [activeTab, setActiveTab] = useState('schedule');
   const [completedWorkouts, setCompletedWorkouts] = useState({});
   const [weight, setWeight] = useState('');
