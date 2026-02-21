@@ -146,44 +146,100 @@ function WorkoutTracker() {
     const newPRs = {...personalRecords};
     let hasNewPR = false;
 
-    // Map exercise keys from strengthWeights to PR exercise names
-    const exerciseMap = {
-      'intensity_squat_reps': 'Intensity Squat',
-      'barbell_rows_set1_reps': 'Barbell Rows (Lower A)',
-      'barbell_rows_set2_reps': 'Barbell Rows (Lower A)',
-      'barbell_rows_set3_reps': 'Barbell Rows (Lower A)',
-      'belt_squats_set1_reps': 'Belt Squats',
-      'belt_squats_set2_reps': 'Belt Squats',
-      'intensity_pull_reps': 'Intensity Pull',
-      'intensity_bench_reps': 'Intensity Bench',
-      'weighted_dips_set1_reps': 'Weighted Dips',
-      'weighted_dips_set2_reps': 'Weighted Dips',
-      'weighted_dips_set3_reps': 'Weighted Dips',
-    };
+    console.log('Checking PRs for workout:', workoutName);
+    console.log('Weights data:', weights);
 
-    // Check each logged exercise
+    // Process each key in weights
     Object.keys(weights).forEach(key => {
-      if (key.includes('_reps') && weights[key]) {
+      // Handle exercises with sets (e.g., barbell_rows_set1_reps, belt_squats_set2_reps)
+      if (key.includes('_set') && key.includes('_reps')) {
         const reps = parseInt(weights[key]);
-        const weightKey = key.replace('_reps', '_weight').replace('set1', '').replace('set2', '').replace('set3', '');
-        const weight = weights[weightKey] || weights[key.replace('_reps', '_weight')];
+        if (!reps) return;
         
-        if (weight && reps) {
-          const exerciseName = exerciseMap[key];
-          if (exerciseName) {
-            const currentPR = newPRs[exerciseName];
-            if (!currentPR || weight > currentPR.weight || (weight === currentPR.weight && reps > currentPR.reps)) {
-              newPRs[exerciseName] = { weight: parseInt(weight), reps: reps };
-              hasNewPR = true;
-            }
-          }
+        // Extract base exercise name and set number
+        const match = key.match(/(.+)_set(\d+)_reps/);
+        if (!match) return;
+        
+        const baseExercise = match[1];
+        const setNum = match[2];
+        
+        // Get weight for this set or use common weight
+        const setWeightKey = `${baseExercise}_set${setNum}_weight`;
+        const commonWeightKey = `${baseExercise}_weight`;
+        const weight = parseInt(weights[setWeightKey] || weights[commonWeightKey]);
+        
+        if (!weight) return;
+        
+        // Create friendly exercise name
+        let exerciseName = baseExercise
+          .replace(/_/g, ' ')
+          .split(' ')
+          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(' ');
+        
+        // Add workout suffix for exercises that appear in multiple workouts
+        if (exerciseName === 'Barbell Rows') {
+          exerciseName = workoutName.includes('Lower A') ? 'Barbell Rows (Lower A)' : 'Barbell Rows (Lower B)';
+        } else if (exerciseName === 'Dumbbell Rows') {
+          exerciseName = workoutName.includes('Lower A') ? 'Dumbbell Rows (Lower A)' : 'Dumbbell Rows (Lower B)';
+        } else if (exerciseName === 'Banded Pullups') {
+          if (workoutName.includes('Lower A')) exerciseName = 'Banded Pull-Ups (Lower A)';
+          else if (workoutName.includes('Lower B')) exerciseName = 'Banded Pull-Ups (Lower B)';
+        } else if (exerciseName === 'Dumbbell Press') {
+          exerciseName = workoutName.includes('Upper A') ? 'Dumbbell Press (Upper A)' : 'Dumbbell Press';
+        } else if (exerciseName === 'Banded Lateral Raises') {
+          exerciseName = workoutName.includes('Upper A') ? 'Banded Lateral Raises (Upper A)' : 'Banded Lateral Raises (Upper B)';
+        } else if (exerciseName === 'Banded Side Raises') {
+          exerciseName = workoutName.includes('Upper A') ? 'Banded Side Raises (Upper A)' : 'Banded Side Raises (Upper B)';
+        }
+        
+        // Check if this is a PR
+        const currentPR = newPRs[exerciseName];
+        if (!currentPR || weight > currentPR.weight || (weight === currentPR.weight && reps > currentPR.reps)) {
+          console.log(`New PR for ${exerciseName}: ${weight} lbs × ${reps} reps`);
+          newPRs[exerciseName] = { weight, reps };
+          hasNewPR = true;
+        }
+      }
+      
+      // Handle exercises without sets (e.g., intensity_squat_reps, intensity_pull_reps)
+      else if (key.includes('_reps') && !key.includes('_set')) {
+        const reps = parseInt(weights[key]);
+        if (!reps) return;
+        
+        const baseExercise = key.replace('_reps', '');
+        const weightKey = `${baseExercise}_weight`;
+        const weight = parseInt(weights[weightKey]);
+        
+        // For intensity lifts, use the progressive weight if no weight key exists
+        if (!weight && (baseExercise === 'intensity_squat' || baseExercise === 'intensity_pull' || baseExercise === 'intensity_bench')) {
+          // These use progressive weights, skip PR tracking as they're already tracked by week
+          return;
+        }
+        
+        if (!weight) return;
+        
+        let exerciseName = baseExercise
+          .replace(/_/g, ' ')
+          .split(' ')
+          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(' ');
+        
+        const currentPR = newPRs[exerciseName];
+        if (!currentPR || weight > currentPR.weight || (weight === currentPR.weight && reps > currentPR.reps)) {
+          console.log(`New PR for ${exerciseName}: ${weight} lbs × ${reps} reps`);
+          newPRs[exerciseName] = { weight, reps };
+          hasNewPR = true;
         }
       }
     });
 
     if (hasNewPR) {
+      console.log('Saving new PRs:', newPRs);
       setPersonalRecords(newPRs);
       savePersonalRecords(newPRs);
+    } else {
+      console.log('No new PRs');
     }
   }
 
