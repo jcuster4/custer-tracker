@@ -49,6 +49,8 @@ function WorkoutTracker() {
   const [cycleOffset, setCycleOffset] = useState(0);
   const [showQuickLog, setShowQuickLog] = useState(false);
   const [quickLogDate, setQuickLogDate] = useState('');
+  const [personalRecords, setPersonalRecords] = useState({});
+  const [expandedWorkouts, setExpandedWorkouts] = useState({});
 
   // Load data from localStorage
   useEffect(() => {
@@ -118,7 +120,71 @@ function WorkoutTracker() {
     } catch (error) {
       console.log('No cycle data found:', error);
     }
+    
+    try {
+      const prs = localStorage.getItem('custer-prs');
+      if (prs) {
+        setPersonalRecords(JSON.parse(prs));
+      }
+    } catch (error) {
+      console.log('No PR data found:', error);
+    }
+    
     console.log('=== LOAD COMPLETE ===');
+  }
+
+  function savePersonalRecords(data) {
+    try {
+      localStorage.setItem('custer-prs', JSON.stringify(data));
+      console.log('Saved PRs to localStorage');
+    } catch (error) {
+      console.error('Error saving PRs:', error);
+    }
+  }
+
+  function checkAndUpdatePRs(workoutName, weights) {
+    const newPRs = {...personalRecords};
+    let hasNewPR = false;
+
+    // Map exercise keys from strengthWeights to PR exercise names
+    const exerciseMap = {
+      'intensity_squat_reps': 'Intensity Squat',
+      'barbell_rows_set1_reps': 'Barbell Rows (Lower A)',
+      'barbell_rows_set2_reps': 'Barbell Rows (Lower A)',
+      'barbell_rows_set3_reps': 'Barbell Rows (Lower A)',
+      'belt_squats_set1_reps': 'Belt Squats',
+      'belt_squats_set2_reps': 'Belt Squats',
+      'intensity_pull_reps': 'Intensity Pull',
+      'intensity_bench_reps': 'Intensity Bench',
+      'weighted_dips_set1_reps': 'Weighted Dips',
+      'weighted_dips_set2_reps': 'Weighted Dips',
+      'weighted_dips_set3_reps': 'Weighted Dips',
+    };
+
+    // Check each logged exercise
+    Object.keys(weights).forEach(key => {
+      if (key.includes('_reps') && weights[key]) {
+        const reps = parseInt(weights[key]);
+        const weightKey = key.replace('_reps', '_weight').replace('set1', '').replace('set2', '').replace('set3', '');
+        const weight = weights[weightKey] || weights[key.replace('_reps', '_weight')];
+        
+        if (weight && reps) {
+          const exerciseName = exerciseMap[key];
+          if (exerciseName) {
+            const currentPR = newPRs[exerciseName];
+            if (!currentPR || weight > currentPR.weight || (weight === currentPR.weight && reps > currentPR.reps)) {
+              newPRs[exerciseName] = { weight: parseInt(weight), reps: reps };
+              hasNewPR = true;
+            }
+          }
+        }
+      }
+    });
+
+    if (hasNewPR) {
+      setPersonalRecords(newPRs);
+      savePersonalRecords(newPRs);
+    }
   }
 
   function saveCompletedWorkouts(data) {
@@ -184,6 +250,35 @@ function WorkoutTracker() {
 
   function handleLogWorkout(day, workoutName) {
     setCurrentWorkout({ day, workoutName });
+    
+    // Load existing workout data if it exists
+    const key = `${day}-${workoutName}`;
+    const existingWorkout = completedWorkouts[key];
+    
+    if (existingWorkout && existingWorkout.notes) {
+      // Check if it's a strength workout with JSON data
+      try {
+        const data = JSON.parse(existingWorkout.notes);
+        setStrengthWeights(data);
+      } catch (e) {
+        // Not JSON, might be Zone 2 Cardio or other format
+        if (workoutName === 'Zone 2 Cardio') {
+          const parts = existingWorkout.notes.split(' | ');
+          if (parts[0]) setZone2Type(parts[0]);
+          if (parts[1]) setZone2Duration(parts[1]);
+          if (parts[2]) setWorkoutNotes(parts[2]);
+        } else {
+          setWorkoutNotes(existingWorkout.notes);
+        }
+      }
+    } else {
+      // Clear fields for new workout
+      setStrengthWeights({});
+      setZone2Type('');
+      setZone2Duration('');
+      setWorkoutNotes('');
+    }
+    
     setShowLogModal(true);
   }
 
@@ -199,6 +294,8 @@ function WorkoutTracker() {
       notes = parts.join(' | ');
     } else if (['Full Body', 'Lower A', 'Lower B', 'Upper A', 'Upper B', 'Lower Deload', 'Upper Deload'].includes(currentWorkout.workoutName) && Object.keys(strengthWeights).length > 0) {
       notes = JSON.stringify(strengthWeights);
+      // Check for PRs
+      checkAndUpdatePRs(currentWorkout.workoutName, strengthWeights);
     }
     
     const newCompleted = {
@@ -356,7 +453,6 @@ function WorkoutTracker() {
         {/* Header */}
         <div className="text-center mb-8 pb-6 border-b-2 border-red-500">
           <h1 className="header-title mb-2">CUSTER TRACKER</h1>
-          <p className="text-zinc-500 text-sm font-medium">Track Your Journey to 12%</p>
           <div className="mt-3 flex justify-center items-center gap-3">
             <span className="text-zinc-400 text-sm">Week {currentWeek}/9</span>
             <span className="text-zinc-600">|</span>
@@ -399,13 +495,23 @@ function WorkoutTracker() {
           </button>
           <button 
             className={`flex-1 py-3 px-4 rounded-lg font-semibold text-sm transition-all ${
-              activeTab === 'progress' 
+              activeTab === 'prs' 
                 ? 'bg-red-500 text-white' 
                 : 'bg-transparent text-zinc-500'
             }`}
-            onClick={() => setActiveTab('progress')}
+            onClick={() => setActiveTab('prs')}
           >
-            Progress
+            PRs
+          </button>
+          <button 
+            className={`flex-1 py-3 px-4 rounded-lg font-semibold text-sm transition-all ${
+              activeTab === 'stats' 
+                ? 'bg-red-500 text-white' 
+                : 'bg-transparent text-zinc-500'
+            }`}
+            onClick={() => setActiveTab('stats')}
+          >
+            Stats
           </button>
           <button 
             className={`flex-1 py-3 px-4 rounded-lg font-semibold text-sm transition-all ${
@@ -504,71 +610,212 @@ function WorkoutTracker() {
           </>
         )}
 
-        {/* Progress Tab */}
-        {activeTab === 'progress' && (
-          <>
-            <div className="grid grid-cols-2 gap-4 mb-6">
-              <div className="bg-zinc-900 p-5 rounded-2xl border border-zinc-800">
-                <div className="text-zinc-500 text-xs font-semibold uppercase mb-2">Weight</div>
-                <div className="stat-value">{currentWeight}</div>
-              </div>
-              <div className="bg-zinc-900 p-5 rounded-2xl border border-zinc-800">
-                <div className="text-zinc-500 text-xs font-semibold uppercase mb-2">Body Fat %</div>
-                <div className="stat-value">{currentBodyFat}</div>
-              </div>
-            </div>
-
-            <div className="bg-zinc-900 rounded-2xl p-5 mb-6 border border-zinc-800">
-              <div className="mb-4">
-                <label className="block text-zinc-500 text-xs font-semibold uppercase mb-2">
-                  Current Weight (lbs)
-                </label>
-                <input 
-                  type="number" 
-                  value={weight}
-                  onChange={(e) => setWeight(e.target.value)}
-                  placeholder="Enter weight"
-                  className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-3 text-white font-semibold"
-                />
-              </div>
-              <div className="mb-4">
-                <label className="block text-zinc-500 text-xs font-semibold uppercase mb-2">
-                  Body Fat % (optional)
-                </label>
-                <input 
-                  type="number" 
-                  step="0.1"
-                  value={bodyFat}
-                  onChange={(e) => setBodyFat(e.target.value)}
-                  placeholder="Enter body fat %"
-                  className="w-full bg-white/5 border border-zinc-800 rounded-lg px-3 py-3 text-white font-semibold"
-                />
-              </div>
-              <button 
-                className="w-full bg-red-500 text-white py-4 rounded-xl font-bold text-sm uppercase tracking-wide hover:bg-orange-500 transition-all"
-                onClick={handleSaveWeight}
-              >
-                Save Progress
-              </button>
-            </div>
-
-            {weightHistory.length > 0 && (
-              <div>
-                <h3 className="text-lg font-bold mb-4">Weight History</h3>
-                {weightHistory.slice(0, 10).map((entry, index) => (
-                  <div key={index} className="bg-zinc-900 rounded-xl p-4 mb-3 border border-zinc-800">
-                    <div className="text-red-500 font-semibold text-sm mb-1">
-                      {new Date(entry.date).toLocaleDateString()}
+        {/* PRs Tab */}
+        {activeTab === 'prs' && (
+          <div>
+            <h3 className="text-lg font-bold mb-4">Personal Records</h3>
+            
+            {/* Full Body PRs */}
+            <div className="mb-6">
+              <h4 className="text-red-500 font-bold text-sm mb-3 uppercase">Full Body (Wednesday)</h4>
+              <div className="bg-zinc-900 rounded-xl p-4 mb-3 border border-zinc-800">
+                {['Seated Rows', 'Dips', 'Dumbbell Press', 'Lunges', 'Lat Pull Down', 'Dumbbell Bench', 'Lateral Raises', 'Hack Squat', 'Face Pulls', 'Cable Crossovers', 'Cheat Side Raises', 'Hamstring Curls'].map(exercise => {
+                  const pr = personalRecords[exercise];
+                  return (
+                    <div key={exercise} className="flex justify-between items-center py-2 border-b border-zinc-800 last:border-0">
+                      <span className="text-zinc-400 text-sm">{exercise}</span>
+                      <span className="text-white font-semibold text-sm">
+                        {pr ? `${pr.weight} lbs × ${pr.reps}` : 'No PR yet'}
+                      </span>
                     </div>
-                    <div className="text-zinc-500 text-sm">
-                      Weight: {entry.weight} lbs
-                      {entry.bodyFat && ` | Body Fat: ${entry.bodyFat}%`}
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Lower A PRs */}
+            <div className="mb-6">
+              <h4 className="text-red-500 font-bold text-sm mb-3 uppercase">Lower A (Weeks 1, 3, 5, 7)</h4>
+              <div className="bg-zinc-900 rounded-xl p-4 mb-3 border border-zinc-800">
+                {['Intensity Squat', 'Barbell Rows (Lower A)', 'Belt Squats', 'Dumbbell Rows (Lower A)', 'Banded Pull-Ups (Lower A)'].map(exercise => {
+                  const pr = personalRecords[exercise];
+                  return (
+                    <div key={exercise} className="flex justify-between items-center py-2 border-b border-zinc-800 last:border-0">
+                      <span className="text-zinc-400 text-sm">{exercise}</span>
+                      <span className="text-white font-semibold text-sm">
+                        {pr ? `${pr.weight} lbs × ${pr.reps}` : 'No PR yet'}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Lower B PRs */}
+            <div className="mb-6">
+              <h4 className="text-red-500 font-bold text-sm mb-3 uppercase">Lower B (Weeks 2, 4, 6, 8)</h4>
+              <div className="bg-zinc-900 rounded-xl p-4 mb-3 border border-zinc-800">
+                {['Intensity Pull', 'Barbell Rows (Lower B)', 'Nordic Curls', 'Dumbbell Rows (Lower B)', 'Banded Pull-Ups (Lower B)'].map(exercise => {
+                  const pr = personalRecords[exercise];
+                  return (
+                    <div key={exercise} className="flex justify-between items-center py-2 border-b border-zinc-800 last:border-0">
+                      <span className="text-zinc-400 text-sm">{exercise}</span>
+                      <span className="text-white font-semibold text-sm">
+                        {pr ? `${pr.weight} lbs × ${pr.reps}` : 'No PR yet'}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Upper A PRs */}
+            <div className="mb-6">
+              <h4 className="text-red-500 font-bold text-sm mb-3 uppercase">Upper A (Weeks 1, 3, 5, 7)</h4>
+              <div className="bg-zinc-900 rounded-xl p-4 mb-3 border border-zinc-800">
+                {['Weighted Dips', 'Dumbbell Press (Upper A)', 'Lying Tricep Extensions', 'Banded Lateral Raises (Upper A)', 'Banded Side Raises (Upper A)'].map(exercise => {
+                  const pr = personalRecords[exercise];
+                  return (
+                    <div key={exercise} className="flex justify-between items-center py-2 border-b border-zinc-800 last:border-0">
+                      <span className="text-zinc-400 text-sm">{exercise}</span>
+                      <span className="text-white font-semibold text-sm">
+                        {pr ? `${pr.weight} lbs × ${pr.reps}` : 'No PR yet'}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Upper B PRs */}
+            <div className="mb-6">
+              <h4 className="text-red-500 font-bold text-sm mb-3 uppercase">Upper B (Weeks 2, 4, 6, 8)</h4>
+              <div className="bg-zinc-900 rounded-xl p-4 mb-3 border border-zinc-800">
+                {['Intensity Bench', 'Barbell Press', 'Incline Dumbbell Bench Press', 'Bicep Curls', 'Banded Lateral Raises (Upper B)', 'Banded Side Raises (Upper B)'].map(exercise => {
+                  const pr = personalRecords[exercise];
+                  return (
+                    <div key={exercise} className="flex justify-between items-center py-2 border-b border-zinc-800 last:border-0">
+                      <span className="text-zinc-400 text-sm">{exercise}</span>
+                      <span className="text-white font-semibold text-sm">
+                        {pr ? `${pr.weight} lbs × ${pr.reps}` : 'No PR yet'}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Weekly Stats Tab */}
+        {activeTab === 'stats' && (
+          <div>
+            <h3 className="text-lg font-bold mb-4">Weekly Trends</h3>
+            
+            {(() => {
+              // Group workouts by week
+              const weekStats = {};
+              
+              Object.entries(completedWorkouts).forEach(([key, data]) => {
+                const week = data.week || 1;
+                if (!weekStats[week]) {
+                  weekStats[week] = {
+                    zone2Minutes: 0,
+                    supplements: 0,
+                    morningMovement: 0,
+                    eveningMovement: 0,
+                    jiujitsu: 0,
+                    reading: 0,
+                    strength: 0,
+                    sprints: 0
+                  };
+                }
+                
+                const [day, workoutName] = key.split('-');
+                
+                if (workoutName === 'Zone 2 Cardio' && data.notes) {
+                  const match = data.notes.match(/(\d+)\s*min/);
+                  if (match) weekStats[week].zone2Minutes += parseInt(match[1]);
+                }
+                if (workoutName === 'Supplements') weekStats[week].supplements++;
+                if (workoutName === 'Morning Movement') weekStats[week].morningMovement++;
+                if (workoutName === 'Evening Movement') weekStats[week].eveningMovement++;
+                if (workoutName === 'Jiu-Jitsu') weekStats[week].jiujitsu++;
+                if (workoutName === 'Reading') weekStats[week].reading++;
+                if (workoutName && (workoutName.includes('Full Body') || workoutName.includes('Lower') || workoutName.includes('Upper'))) {
+                  weekStats[week].strength++;
+                }
+                if (workoutName && workoutName.includes('Sprint')) weekStats[week].sprints++;
+              });
+              
+              // Sort weeks in reverse order (most recent first)
+              const sortedWeeks = Object.keys(weekStats).sort((a, b) => b - a);
+              
+              if (sortedWeeks.length === 0) {
+                return (
+                  <div className="bg-zinc-900 rounded-xl p-8 text-center border border-zinc-800">
+                    <p className="text-zinc-500">No workout data yet. Start logging to see trends!</p>
+                  </div>
+                );
+              }
+              
+              return sortedWeeks.map(week => {
+                const stats = weekStats[week];
+                return (
+                  <div key={week} className="bg-zinc-900 rounded-2xl p-5 mb-4 border border-zinc-800">
+                    <div className="flex justify-between items-center mb-4 pb-3 border-b border-zinc-800">
+                      <h4 className="text-orange-500 font-bold text-lg uppercase">Week {week}</h4>
+                      <span className="text-zinc-500 text-xs">
+                        {week === currentWeek ? 'Current Week' : week === 9 ? 'Deload' : `Cycle ${Math.floor((week - 1) / 9) + 1}`}
+                      </span>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="bg-white/5 rounded-lg p-3">
+                        <div className="text-zinc-500 text-xs mb-1">Zone 2 Cardio</div>
+                        <div className="text-white font-bold text-xl">{stats.zone2Minutes} min</div>
+                      </div>
+                      
+                      <div className="bg-white/5 rounded-lg p-3">
+                        <div className="text-zinc-500 text-xs mb-1">Strength Sessions</div>
+                        <div className="text-white font-bold text-xl">{stats.strength}</div>
+                      </div>
+                      
+                      <div className="bg-white/5 rounded-lg p-3">
+                        <div className="text-zinc-500 text-xs mb-1">Jiu-Jitsu</div>
+                        <div className="text-white font-bold text-xl">{stats.jiujitsu}</div>
+                      </div>
+                      
+                      <div className="bg-white/5 rounded-lg p-3">
+                        <div className="text-zinc-500 text-xs mb-1">Supplements</div>
+                        <div className="text-white font-bold text-xl">{stats.supplements}</div>
+                      </div>
+                      
+                      <div className="bg-white/5 rounded-lg p-3">
+                        <div className="text-zinc-500 text-xs mb-1">Morning Movement</div>
+                        <div className="text-white font-bold text-xl">{stats.morningMovement}</div>
+                      </div>
+                      
+                      <div className="bg-white/5 rounded-lg p-3">
+                        <div className="text-zinc-500 text-xs mb-1">Evening Movement</div>
+                        <div className="text-white font-bold text-xl">{stats.eveningMovement}</div>
+                      </div>
+                      
+                      <div className="bg-white/5 rounded-lg p-3">
+                        <div className="text-zinc-500 text-xs mb-1">Sprints</div>
+                        <div className="text-white font-bold text-xl">{stats.sprints}</div>
+                      </div>
+                      
+                      <div className="bg-white/5 rounded-lg p-3">
+                        <div className="text-zinc-500 text-xs mb-1">Reading</div>
+                        <div className="text-white font-bold text-xl">{stats.reading}</div>
+                      </div>
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
-          </>
+                );
+              });
+            })()}
+          </div>
         )}
 
         {/* History Tab */}
@@ -577,19 +824,110 @@ function WorkoutTracker() {
             <h3 className="text-lg font-bold mb-4">Workout History</h3>
             {Object.entries(completedWorkouts)
               .sort((a, b) => new Date(b[1].date) - new Date(a[1].date))
-              .slice(0, 20)
+              .slice(0, 30)
               .map(([key, data]) => {
                 const [day, ...workoutParts] = key.split('-');
                 const workoutName = workoutParts.join('-');
+                const isExpanded = expandedWorkouts[key];
+                const isStrengthWorkout = ['Full Body', 'Lower A', 'Lower B', 'Upper A', 'Upper B', 'Lower Deload', 'Upper Deload'].some(w => workoutName.includes(w));
+                
+                let workoutData = null;
+                if (isStrengthWorkout && data.notes && data.notes.startsWith('{')) {
+                  try {
+                    workoutData = JSON.parse(data.notes);
+                  } catch (e) {
+                    console.error('Failed to parse workout data:', e);
+                  }
+                }
+                
                 return (
-                  <div key={key} className="bg-zinc-900 rounded-xl p-4 mb-3 border border-zinc-800">
-                    <div className="text-red-500 font-semibold text-sm mb-1">
-                      {new Date(data.date).toLocaleDateString()} - {day} - Week {data.week || '?'}
+                  <div 
+                    key={key} 
+                    className="bg-zinc-900 rounded-xl p-4 mb-3 border border-zinc-800 cursor-pointer hover:border-red-500 transition-all"
+                    onClick={() => {
+                      if (isStrengthWorkout && workoutData) {
+                        setExpandedWorkouts({...expandedWorkouts, [key]: !isExpanded});
+                      }
+                    }}
+                  >
+                    <div className="flex justify-between items-center">
+                      <div className="flex-1">
+                        <div className="text-red-500 font-semibold text-sm mb-1">
+                          {new Date(data.date).toLocaleDateString()} - {day} - Week {data.week || '?'}
+                        </div>
+                        <div className="text-white font-semibold text-sm">
+                          {workoutName}
+                        </div>
+                        {data.notes && !data.notes.startsWith('{') && (
+                          <div className="text-zinc-500 text-sm mt-1">{data.notes}</div>
+                        )}
+                      </div>
+                      {isStrengthWorkout && workoutData && (
+                        <div className="text-zinc-500 text-xl ml-2">
+                          {isExpanded ? '▼' : '▶'}
+                        </div>
+                      )}
                     </div>
-                    <div className="text-zinc-500 text-sm">
-                      {workoutName}
-                      {data.notes && !data.notes.startsWith('{') && ` | ${data.notes}`}
-                    </div>
+                    
+                    {isExpanded && workoutData && (
+                      <div className="mt-4 pt-4 border-t border-zinc-800" onClick={(e) => e.stopPropagation()}>
+                        <div className="space-y-3">
+                          {Object.entries(workoutData).map(([exerciseKey, value]) => {
+                            // Format the exercise name from the key
+                            let exerciseName = exerciseKey
+                              .replace(/_/g, ' ')
+                              .replace(/set\d+/gi, '')
+                              .replace(/reps|weight/gi, '')
+                              .trim();
+                            
+                            // Capitalize first letter of each word
+                            exerciseName = exerciseName
+                              .split(' ')
+                              .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                              .join(' ');
+                            
+                            // Skip empty values
+                            if (!value) return null;
+                            
+                            // Group sets together for display
+                            if (exerciseKey.includes('_reps')) {
+                              const baseKey = exerciseKey.replace(/_set\d+_reps/, '').replace(/_reps/, '');
+                              const setMatch = exerciseKey.match(/set(\d+)/);
+                              const setNum = setMatch ? setMatch[1] : null;
+                              const weightKey = setNum 
+                                ? `${baseKey}_set${setNum}_weight`
+                                : `${baseKey}_weight`;
+                              const weight = workoutData[weightKey] || workoutData[`${baseKey}_weight`];
+                              
+                              return (
+                                <div key={exerciseKey} className="bg-white/5 rounded-lg p-2">
+                                  <div className="text-zinc-400 text-xs">{exerciseName}</div>
+                                  <div className="text-white text-sm font-semibold">
+                                    {weight ? `${weight} lbs × ${value} reps` : `${value} reps`}
+                                    {setNum && <span className="text-zinc-500 ml-2">Set {setNum}</span>}
+                                  </div>
+                                </div>
+                              );
+                            }
+                            
+                            // Skip weight entries (they're displayed with reps above)
+                            if (exerciseKey.includes('_weight')) return null;
+                            
+                            // Show other values like barbell press sets
+                            if (exerciseKey.includes('_sets')) {
+                              return (
+                                <div key={exerciseKey} className="bg-white/5 rounded-lg p-2">
+                                  <div className="text-zinc-400 text-xs">{exerciseName}</div>
+                                  <div className="text-white text-sm font-semibold">{value} sets</div>
+                                </div>
+                              );
+                            }
+                            
+                            return null;
+                          })}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}
