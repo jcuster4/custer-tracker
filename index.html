@@ -213,12 +213,15 @@ function WorkoutTracker() {
         
         const baseExercise = key.replace('_reps', '');
         const weightKey = `${baseExercise}_weight`;
-        const weight = parseInt(weights[weightKey]);
+        let weight = parseInt(weights[weightKey]);
         
-        // For intensity lifts, use the progressive weight if no weight key exists
-        if (!weight && (baseExercise === 'intensity_squat' || baseExercise === 'intensity_pull' || baseExercise === 'intensity_bench')) {
-          // These use progressive weights, skip PR tracking as they're already tracked by week
-          return;
+        // For intensity lifts, calculate the progressive weight if no weight key exists
+        if (!weight && baseExercise === 'intensity_squat') {
+          weight = getProgressionWeight(315, currentWeek, cycleOffset);
+        } else if (!weight && baseExercise === 'intensity_pull') {
+          weight = getProgressionWeight(365, currentWeek, cycleOffset);
+        } else if (!weight && baseExercise === 'intensity_bench') {
+          weight = getProgressionWeight(230, currentWeek, cycleOffset);
         }
         
         if (!weight) return;
