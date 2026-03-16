@@ -609,7 +609,7 @@ function WorkoutTracker() {
               const isComplete = completedCount === daySchedule.workouts.length;
  
               // Calculate the date for this day based on Week 1 starting Feb 16, 2026
-              const week1Monday = new Date('2026-02-16'); // Week 1, Monday
+              const week1Monday = new Date(2026, 1, 16); // Week 1, Monday (month is 0-indexed, so 1 = February)
               const daysOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
               const targetDayIndex = daysOfWeek.indexOf(daySchedule.day);
               
